@@ -41,6 +41,24 @@ class AfipSdkClient implements ArcaClient
         return (int) $this->client->ElectronicBilling->GetLastVoucher($pointOfSale, $voucherType);
     }
 
+    public function getSalesPoints(): array
+    {
+        $response = $this->client->ElectronicBilling->GetSalesPoints();
+        $encoded = json_encode($response);
+
+        if ($encoded === false) {
+            return [];
+        }
+
+        $normalized = json_decode($encoded, true);
+
+        if (! is_array($normalized)) {
+            return [];
+        }
+
+        return array_is_list($normalized) ? $normalized : [$normalized];
+    }
+
     public function createVoucher(array $data): array
     {
         $response = $this->client->ElectronicBilling->CreateVoucher($data, true);

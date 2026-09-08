@@ -4,6 +4,11 @@ namespace Modules\Arca\Contracts;
 
 interface ArcaClient
 {
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function getSalesPoints(): array;
+
     public function getLastVoucher(int $pointOfSale, int $voucherType): int;
 
     /**

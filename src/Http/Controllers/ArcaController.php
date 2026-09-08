@@ -19,6 +19,16 @@ class ArcaController
         ])->values());
     }
 
+    public function pointOfSalesFromArca(ArcaManager $arca): JsonResponse
+    {
+        return response()->json($arca->pointOfSales()->fromArca());
+    }
+
+    public function syncPointOfSales(ArcaManager $arca): JsonResponse
+    {
+        return response()->json($arca->pointOfSales()->syncFromArca());
+    }
+
     public function storePointOfSale(StorePointOfSaleRequest $request, ArcaManager $arca): JsonResponse
     {
         $pointOfSale = $arca->pointOfSales()->create($request->validated());

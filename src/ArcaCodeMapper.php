@@ -9,6 +9,24 @@ use Modules\Arca\Exceptions\ArcaException;
 
 class ArcaCodeMapper
 {
+    /**
+     * @return list<array{letter: string, operation: string, type: int, label: string}>
+     */
+    public function voucherTypes(): array
+    {
+        return [
+            ['letter' => 'A', 'operation' => 'invoice', 'type' => 1, 'label' => 'Factura A'],
+            ['letter' => 'A', 'operation' => 'debit_note', 'type' => 2, 'label' => 'Nota de débito A'],
+            ['letter' => 'A', 'operation' => 'credit_note', 'type' => 3, 'label' => 'Nota de crédito A'],
+            ['letter' => 'B', 'operation' => 'invoice', 'type' => 6, 'label' => 'Factura B'],
+            ['letter' => 'B', 'operation' => 'debit_note', 'type' => 7, 'label' => 'Nota de débito B'],
+            ['letter' => 'B', 'operation' => 'credit_note', 'type' => 8, 'label' => 'Nota de crédito B'],
+            ['letter' => 'C', 'operation' => 'invoice', 'type' => 11, 'label' => 'Factura C'],
+            ['letter' => 'C', 'operation' => 'debit_note', 'type' => 12, 'label' => 'Nota de débito C'],
+            ['letter' => 'C', 'operation' => 'credit_note', 'type' => 13, 'label' => 'Nota de crédito C'],
+        ];
+    }
+
     public function voucherType(VoucherLetter $letter, VoucherOperation $operation): int
     {
         return match ([$letter, $operation]) {
@@ -29,7 +47,15 @@ class ArcaCodeMapper
         return match ($type) {
             'cuit' => 80,
             'cuil' => 86,
+            'cdi' => 87,
+            'le' => 89,
+            'lc' => 90,
+            'foreign_id' => 91,
+            'in_process' => 92,
+            'birth_certificate' => 93,
+            'ci_buenos_aires' => 95,
             'dni' => 96,
+            'passport' => 94,
             'consumer_final' => 99,
             default => throw new ArcaException("Unsupported document type [{$type}]."),
         };
@@ -43,8 +69,12 @@ class ArcaCodeMapper
             'consumer_final' => 5,
             'monotributo' => 6,
             'not_categorized' => 7,
+            'foreign_provider' => 8,
             'foreign_customer' => 9,
+            'iva_liberated' => 10,
+            'social_monotributo' => 13,
             'not_reached' => 15,
+            'promoted_monotributo' => 16,
             default => throw new ArcaException("Unsupported VAT condition [{$condition}]."),
         };
     }
