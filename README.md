@@ -389,12 +389,20 @@ Para dólares:
 'exchange_rate' => 1000,
 ```
 
+Para euros:
+
+```php
+'currency' => 'EUR',
+'exchange_rate' => 1200,
+```
+
 El módulo transforma:
 
 | CRM | ARCA |
 | --- | --- |
 | `ARS` | `PES`, cotización `1` |
 | `USD` | `DOL`, cotización obligatoria y positiva |
+| `EUR` | `060`, cotización obligatoria y positiva |
 
 Los importes se informan en la moneda del comprobante. La cotización no convierte los importes; se envía a ARCA como `MonCotiz`.
 

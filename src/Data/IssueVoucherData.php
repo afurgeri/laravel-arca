@@ -45,7 +45,7 @@ final readonly class IssueVoucherData
             'letter' => ['required', 'string', 'in:A,B,C'],
             'operation' => ['required', 'string', 'in:invoice,credit_note,debit_note'],
             'concept' => ['nullable', 'string', 'in:products,services,products_and_services'],
-            'currency' => ['nullable', 'string', 'in:ARS,USD'],
+            'currency' => ['nullable', 'string', 'in:ARS,USD,EUR'],
             'exchange_rate' => ['nullable', 'numeric', 'gt:0'],
             'customer' => ['required', 'array'],
             'customer.document_type' => ['required', 'string'],
@@ -91,8 +91,8 @@ final readonly class IssueVoucherData
                 $validator->errors()->add('associated_voucher', 'Credit and debit notes require an associated invoice.');
             }
 
-            if (($input['currency'] ?? 'ARS') === 'USD' && ! isset($input['exchange_rate'])) {
-                $validator->errors()->add('exchange_rate', 'An exchange rate is required for USD vouchers.');
+            if (in_array($input['currency'] ?? 'ARS', ['USD', 'EUR'], true) && ! isset($input['exchange_rate'])) {
+                $validator->errors()->add('exchange_rate', 'An exchange rate is required for foreign currency vouchers.');
             }
         })->validate();
 
@@ -104,7 +104,9 @@ final readonly class IssueVoucherData
             operation: VoucherOperation::from($validated['operation']),
             concept: VoucherConcept::from($validated['concept'] ?? VoucherConcept::Products->value),
             currency: $currency,
-            exchangeRate: $currency === Currency::Usd ? (float) $validated['exchange_rate'] : 1,
+            exchangeRate: in_array($currency, [Currency::Usd, Currency::Eur], true)
+                ? (float) $validated['exchange_rate']
+                : 1,
             customer: $validated['customer'],
             amounts: $validated['amounts'],
             vatRates: $validated['vat_rates'] ?? [],
