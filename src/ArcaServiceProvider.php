@@ -3,6 +3,7 @@
 namespace Modules\Arca;
 
 use Illuminate\Support\ServiceProvider;
+use Modules\Arca\Console\Commands\SyncPointOfSalesCommand;
 use Modules\Arca\Contracts\ArcaClient;
 use Modules\Arca\Infrastructure\AfipSdkClient;
 
@@ -18,6 +19,10 @@ class ArcaServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        if ($this->app->runningInConsole()) {
+            $this->commands([SyncPointOfSalesCommand::class]);
+        }
+
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         $this->loadRoutesFrom(__DIR__.'/../routes/api.php');
 

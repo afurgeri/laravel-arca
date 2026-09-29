@@ -256,6 +256,18 @@ POST /api/arca/point-of-sales/sync
 
 La sincronización actualiza el nombre y el estado de cada punto de venta, crea las secuencias faltantes y nunca retrocede un contador local que ya haya reservado un número.
 
+También puede ejecutarse desde la consola:
+
+```bash
+php artisan arca:sync-points-of-sale
+```
+
+Para consultar los puntos y contadores de ARCA sin crear ni actualizar puntos, secuencias ni registros de auditoría locales:
+
+```bash
+php artisan arca:sync-points-of-sale --dry-run
+```
+
 En homologación, ARCA normalmente expone sólo el punto de venta de prueba `1`; es normal que la consulta no devuelva los puntos de producción.
 
 ## Datos del comprobante
