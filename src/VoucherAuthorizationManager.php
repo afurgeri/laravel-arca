@@ -2,9 +2,11 @@
 
 namespace Modules\Arca;
 
+use DateTimeImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Modules\Arca\Contracts\ArcaClient;
 use Modules\Arca\Data\AuthorizationResult;
 use Modules\Arca\Data\IssueVoucherData;
@@ -65,7 +67,7 @@ class VoucherAuthorizationManager
             $voucher->update([
                 'status' => $status,
                 'cae' => $authorized ? (string) $cae : null,
-                'cae_expires_at' => $authorized ? $caeExpiresAt : null,
+                'cae_expires_at' => $authorized ? $this->normalizeCaeExpirationDate($caeExpiresAt) : null,
                 'arca_response' => $response,
                 'error_message' => $errorMessage,
             ]);
@@ -168,6 +170,28 @@ class VoucherAuthorizationManager
         if (! PointOfSale::query()->where('number', $number)->where('active', true)->exists()) {
             throw (new ModelNotFoundException)->setModel(PointOfSale::class, [$number]);
         }
+    }
+
+    private function normalizeCaeExpirationDate(mixed $date): ?string
+    {
+        if ($date === null || $date === '') {
+            return null;
+        }
+
+        $date = (string) $date;
+
+        if (preg_match('/^\d{8}$/D', $date) !== 1) {
+            return $date;
+        }
+
+        $parsedDate = DateTimeImmutable::createFromFormat('!Ymd', $date);
+        $errors = DateTimeImmutable::getLastErrors();
+
+        if ($parsedDate === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
+            throw new InvalidArgumentException('ARCA returned an invalid CAE expiration date.');
+        }
+
+        return $parsedDate->format('Y-m-d');
     }
 
     /**
