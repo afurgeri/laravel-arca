@@ -21,7 +21,7 @@ final readonly class AuthorizationResult
             'voucher_id' => $this->voucher->id,
             'point_of_sale' => $pointOfSale,
             'voucher_number' => $this->voucher->number,
-            'formatted_number' => sprintf('%05d-%08d', $pointOfSale, $this->voucher->number),
+            'formatted_number' => $this->voucher->number === null ? null : sprintf('%05d-%08d', $pointOfSale, $this->voucher->number),
             'currency' => $this->voucher->currency,
             'exchange_rate' => $this->voucher->exchange_rate,
             'cae' => $this->voucher->cae,

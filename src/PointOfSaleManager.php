@@ -101,8 +101,8 @@ class PointOfSaleManager
                     $sequence = Sequence::query()->whereKey($sequence->id)->lockForUpdate()->firstOrFail();
 
                     $sequence->update([
-                        'next_number' => max((int) $sequence->next_number, $lastNumber + 1),
-                        'last_synced_number' => max((int) $sequence->last_synced_number, $lastNumber),
+                        'next_number' => $lastNumber + 1,
+                        'last_synced_number' => $lastNumber,
                     ]);
                 });
             }

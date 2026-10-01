@@ -10,6 +10,7 @@ use InvalidArgumentException;
 use Modules\Arca\Contracts\ArcaClient;
 use Modules\Arca\Data\AuthorizationResult;
 use Modules\Arca\Data\IssueVoucherData;
+use Modules\Arca\Enums\Currency;
 use Modules\Arca\Enums\VoucherLetter;
 use Modules\Arca\Enums\VoucherOperation;
 use Modules\Arca\Enums\VoucherStatus;
@@ -17,6 +18,7 @@ use Modules\Arca\Models\ArcaOperation;
 use Modules\Arca\Models\PointOfSale;
 use Modules\Arca\Models\Sequence;
 use Modules\Arca\Models\Voucher;
+use RuntimeException;
 use Throwable;
 
 class VoucherAuthorizationManager
@@ -33,6 +35,10 @@ class VoucherAuthorizationManager
             : Voucher::query()->where('idempotency_key', $data->idempotencyKey)->first();
 
         if ($existing !== null) {
+            if (in_array($existing->status, [VoucherStatus::Pending->value, VoucherStatus::Unknown->value, VoucherStatus::Rejected->value], true) && $existing->number !== null) {
+                $this->reconcileVoucher($existing, $data->pointOfSale);
+            }
+
             return new AuthorizationResult($existing);
         }
 
@@ -140,7 +146,31 @@ class VoucherAuthorizationManager
                 ['next_number' => 1, 'last_synced_number' => 0],
             );
             $sequence = Sequence::query()->whereKey($sequence->id)->lockForUpdate()->firstOrFail();
-            $number = max((int) $sequence->next_number, $lastAuthorized + 1);
+            $number = $lastAuthorized + 1;
+            $occupied = Voucher::query()
+                ->where('point_of_sale_id', $pointOfSale->id)
+                ->where('voucher_type', $voucherType)
+                ->where('number', $number)
+                ->lockForUpdate()
+                ->first();
+
+            if ($occupied !== null) {
+                if (! in_array($occupied->status, [VoucherStatus::Rejected->value, VoucherStatus::Unknown->value], true)) {
+                    throw new RuntimeException("ARCA voucher {$number} is already reserved locally. Verify its authorization before issuing another voucher.");
+                }
+
+                $this->reconcileVoucher($occupied, $data->pointOfSale);
+
+                if ($occupied->status === VoucherStatus::Authorized->value) {
+                    throw new RuntimeException("ARCA voucher {$number} was already authorized. Synchronize the point of sale before issuing another voucher.");
+                }
+
+                $occupied->update([
+                    'attempted_number' => $number,
+                    'number' => null,
+                    'status' => VoucherStatus::Failed->value,
+                ]);
+            }
 
             $sequence->update([
                 'next_number' => $number + 1,
@@ -163,6 +193,45 @@ class VoucherAuthorizationManager
                 'idempotency_key' => $data->idempotencyKey,
             ]);
         });
+    }
+
+    private function reconcileVoucher(Voucher $voucher, int $pointOfSale): void
+    {
+        if ($voucher->number === null) {
+            return;
+        }
+
+        $response = $this->arca->getVoucherInfo($voucher->number, $pointOfSale, $voucher->voucher_type);
+
+        if ($response === null) {
+            return;
+        }
+
+        $cae = $response['CodAutorizacion'] ?? $response['CAE'] ?? null;
+        $documentNumber = $response['DocNro'] ?? null;
+        $documentType = $response['DocTipo'] ?? null;
+        $total = $response['ImpTotal'] ?? null;
+        $request = $voucher->operations()->where('method', 'ElectronicBilling.CreateVoucher')->latest('id')->first()?->request;
+        $dateMatches = ! isset($request['CbteFch'], $response['CbteFch'])
+            || (string) $request['CbteFch'] === str_replace('-', '', (string) $response['CbteFch']);
+        $currencyMatches = ! isset($response['MonId'])
+            || (string) $response['MonId'] === Currency::from($voucher->currency)->arcaCode();
+
+        if ($cae === null || (string) $cae === '' || $documentNumber === null || $documentType === null || $total === null
+            || (string) $documentNumber !== (string) $voucher->customer['document_number']
+            || (int) $documentType !== $this->mapper->documentType((string) $voucher->customer['document_type'])
+            || abs((float) $total - (float) $voucher->amounts['total']) > 0.01
+            || ! $dateMatches || ! $currencyMatches) {
+            throw new RuntimeException("ARCA voucher {$voucher->number} exists but does not match the local invoice. Manual reconciliation is required.");
+        }
+
+        $voucher->update([
+            'status' => VoucherStatus::Authorized->value,
+            'cae' => (string) $cae,
+            'cae_expires_at' => $this->normalizeCaeExpirationDate($response['FchVto'] ?? $response['CAEFchVto'] ?? null),
+            'arca_response' => $response,
+            'error_message' => null,
+        ]);
     }
 
     private function ensurePointOfSaleIsActive(int $number): void

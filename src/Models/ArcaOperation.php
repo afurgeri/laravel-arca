@@ -6,6 +6,9 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property array<string, mixed>|null $request
+ */
 #[Fillable([
     'voucher_id', 'correlation_id', 'method', 'status', 'http_status', 'attempt',
     'duration_ms', 'request', 'response', 'error_code', 'error_message',

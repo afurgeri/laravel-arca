@@ -41,6 +41,25 @@ class AfipSdkClient implements ArcaClient
         return (int) $this->client->ElectronicBilling->GetLastVoucher($pointOfSale, $voucherType);
     }
 
+    public function getVoucherInfo(int $number, int $pointOfSale, int $voucherType): ?array
+    {
+        $billing = $this->client->ElectronicBilling;
+
+        if (! method_exists($billing, 'GetVoucherInfo')) {
+            throw new ArcaException('The ARCA SDK does not support voucher lookup.');
+        }
+
+        $response = $billing->GetVoucherInfo($number, $pointOfSale, $voucherType);
+
+        if ($response === null) {
+            return null;
+        }
+
+        $normalized = json_decode((string) json_encode($response), true);
+
+        return is_array($normalized) ? $normalized : null;
+    }
+
     public function getSalesPoints(): array
     {
         $response = $this->client->ElectronicBilling->GetSalesPoints();

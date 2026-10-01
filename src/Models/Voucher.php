@@ -16,14 +16,17 @@ use Illuminate\Support\Carbon;
  * @property string $operation
  * @property string $currency
  * @property float $exchange_rate
- * @property int $number
+ * @property int|null $number
+ * @property int|null $attempted_number
  * @property string $status
  * @property string|null $cae
  * @property Carbon|null $cae_expires_at
  * @property string|null $error_message
+ * @property array<string, mixed> $customer
+ * @property array<string, mixed> $amounts
  */
 #[Fillable([
-    'point_of_sale_id', 'voucher_type', 'letter', 'operation', 'currency', 'exchange_rate', 'number', 'status',
+    'point_of_sale_id', 'voucher_type', 'letter', 'operation', 'currency', 'exchange_rate', 'number', 'attempted_number', 'status',
     'customer', 'amounts', 'vat_rates', 'associated_voucher', 'idempotency_key',
     'cae', 'cae_expires_at', 'arca_response', 'error_code', 'error_message',
 ])]
