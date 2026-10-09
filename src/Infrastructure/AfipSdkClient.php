@@ -84,6 +84,30 @@ class AfipSdkClient implements ArcaClient
         return array_is_list($normalized) ? $normalized : [$normalized];
     }
 
+    public function getVoucherTypes(): array
+    {
+        $billing = $this->client->ElectronicBilling;
+
+        if (! method_exists($billing, 'GetVoucherTypes')) {
+            throw new ArcaException('The ARCA SDK does not support voucher type lookup.');
+        }
+
+        $response = $billing->GetVoucherTypes();
+        $encoded = json_encode($response);
+
+        if ($encoded === false) {
+            return [];
+        }
+
+        $normalized = json_decode($encoded, true);
+
+        if (! is_array($normalized)) {
+            return [];
+        }
+
+        return array_is_list($normalized) ? $normalized : [$normalized];
+    }
+
     public function createVoucher(array $data): array
     {
         $response = $this->client->ElectronicBilling->CreateVoucher($data, true);

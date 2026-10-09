@@ -309,6 +309,25 @@ php artisan arca:sync-points-of-sale --dry-run
 
 En homologación, ARCA normalmente expone sólo el punto de venta de prueba `1`; es normal que la consulta no devuelva los puntos de producción.
 
+### Consultar tipos de comprobante en ARCA
+
+`ArcaClient::getVoucherTypes()` consulta los tipos de comprobante habilitados en WSFE usando las credenciales y el CUIT de la instancia del cliente. Es una consulta de solo lectura y no depende de que la cuenta tenga puntos de venta configurados, por lo que también sirve para comprobar acceso autenticado a WSFE en homologación.
+
+```php
+use Modules\Arca\ArcaFactory;
+use Modules\Arca\Data\ArcaCredentials;
+
+$arca = app(ArcaFactory::class)->forCredentials(new ArcaCredentials(
+    cuit: $account->cuit,
+    accessToken: $account->afipsdk_api_key,
+    production: false,
+    certificate: $account->certificate_pem,
+    privateKey: $account->private_key_pem,
+));
+
+$voucherTypes = $arca->getVoucherTypes();
+```
+
 ## Datos del comprobante
 
 ### Tipo de operación

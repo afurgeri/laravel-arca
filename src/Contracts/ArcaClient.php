@@ -9,6 +9,11 @@ interface ArcaClient
      */
     public function getSalesPoints(): array;
 
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function getVoucherTypes(): array;
+
     public function getLastVoucher(int $pointOfSale, int $voucherType): int;
 
     /**

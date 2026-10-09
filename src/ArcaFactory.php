@@ -32,6 +32,7 @@ class ArcaFactory
         return new ArcaManager(
             new PointOfSaleManager($client, $mapper, $scope),
             new VoucherAuthorizationManager($client, $mapper, $scope),
+            $client,
         );
     }
 }
