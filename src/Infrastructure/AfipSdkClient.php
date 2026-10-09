@@ -4,22 +4,28 @@ namespace Modules\Arca\Infrastructure;
 
 use Afip;
 use Modules\Arca\Contracts\ArcaClient;
+use Modules\Arca\Data\ArcaCredentials;
 use Modules\Arca\Exceptions\ArcaException;
 
 class AfipSdkClient implements ArcaClient
 {
     private Afip $client;
 
-    public function __construct()
+    public function __construct(?ArcaCredentials $credentials = null)
     {
         $options = [
-            'CUIT' => (int) config('arca.cuit'),
-            'access_token' => config('arca.access_token'),
-            'production' => (bool) config('arca.production', false),
+            'CUIT' => (int) ($credentials === null ? config('arca.cuit') : $credentials->cuit),
+            'access_token' => $credentials === null ? config('arca.access_token') : $credentials->accessToken,
+            'production' => $credentials === null ? (bool) config('arca.production', false) : $credentials->production,
         ];
 
-        $certificatePath = config('arca.certificate_path');
-        $privateKeyPath = config('arca.private_key_path');
+        $certificatePath = $credentials === null ? config('arca.certificate_path') : null;
+        $privateKeyPath = $credentials === null ? config('arca.private_key_path') : null;
+
+        if ($credentials?->certificate !== null && $credentials->privateKey !== null) {
+            $options['cert'] = $credentials->certificate;
+            $options['key'] = $credentials->privateKey;
+        }
 
         if ($certificatePath !== null && $privateKeyPath !== null) {
             $certificate = file_get_contents((string) $certificatePath);

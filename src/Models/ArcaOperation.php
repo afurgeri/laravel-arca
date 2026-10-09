@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property array<string, mixed>|null $request
  */
 #[Fillable([
-    'voucher_id', 'correlation_id', 'method', 'status', 'http_status', 'attempt',
+    'cuit', 'environment', 'voucher_id', 'correlation_id', 'method', 'status', 'http_status', 'attempt',
     'duration_ms', 'request', 'response', 'error_code', 'error_message',
 ])]
 class ArcaOperation extends Model

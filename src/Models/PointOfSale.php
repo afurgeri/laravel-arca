@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $name
  * @property bool $active
  */
-#[Fillable(['number', 'name', 'active'])]
+#[Fillable(['cuit', 'environment', 'number', 'name', 'active'])]
 class PointOfSale extends Model
 {
     public function getTable(): string

@@ -26,13 +26,14 @@ class VoucherAuthorizationManager
     public function __construct(
         private readonly ArcaClient $arca,
         private readonly ArcaCodeMapper $mapper,
+        private readonly ArcaScope $scope,
     ) {}
 
     public function authorize(IssueVoucherData $data): AuthorizationResult
     {
         $existing = $data->idempotencyKey === null
             ? null
-            : Voucher::query()->where('idempotency_key', $data->idempotencyKey)->first();
+            : Voucher::query()->where($this->scope->attributes())->where('idempotency_key', $data->idempotencyKey)->first();
 
         if ($existing !== null) {
             if (in_array($existing->status, [VoucherStatus::Pending->value, VoucherStatus::Unknown->value, VoucherStatus::Rejected->value], true) && $existing->number !== null) {
@@ -59,7 +60,7 @@ class VoucherAuthorizationManager
             $status = $authorized ? VoucherStatus::Authorized->value : VoucherStatus::Rejected->value;
             $errorMessage = $authorized ? null : $this->responseMessage($response);
 
-            ArcaOperation::query()->create([
+            ArcaOperation::query()->create($this->scope->attributes() + [
                 'voucher_id' => $voucher->id,
                 'correlation_id' => $correlationId,
                 'method' => 'ElectronicBilling.CreateVoucher',
@@ -78,7 +79,7 @@ class VoucherAuthorizationManager
                 'error_message' => $errorMessage,
             ]);
         } catch (Throwable $exception) {
-            ArcaOperation::query()->create([
+            ArcaOperation::query()->create($this->scope->attributes() + [
                 'voucher_id' => $voucher->id,
                 'correlation_id' => $correlationId,
                 'method' => 'ElectronicBilling.CreateVoucher',
@@ -105,7 +106,7 @@ class VoucherAuthorizationManager
         try {
             $last = $this->arca->getLastVoucher($pointOfSale, $voucherType);
 
-            ArcaOperation::query()->create([
+            ArcaOperation::query()->create($this->scope->attributes() + [
                 'correlation_id' => $correlationId,
                 'method' => 'ElectronicBilling.GetLastVoucher',
                 'status' => 'successful',
@@ -116,7 +117,7 @@ class VoucherAuthorizationManager
 
             return $last;
         } catch (Throwable $exception) {
-            ArcaOperation::query()->create([
+            ArcaOperation::query()->create($this->scope->attributes() + [
                 'correlation_id' => $correlationId,
                 'method' => 'ElectronicBilling.GetLastVoucher',
                 'status' => 'failed',
@@ -133,6 +134,7 @@ class VoucherAuthorizationManager
     {
         return DB::transaction(function () use ($data, $voucherType, $lastAuthorized): Voucher {
             $pointOfSale = PointOfSale::query()
+                ->where($this->scope->attributes())
                 ->where('number', $data->pointOfSale)
                 ->where('active', true)
                 ->first();
@@ -177,7 +179,7 @@ class VoucherAuthorizationManager
                 'last_synced_number' => max((int) $sequence->last_synced_number, $lastAuthorized),
             ]);
 
-            return Voucher::query()->create([
+            return Voucher::query()->create($this->scope->attributes() + [
                 'point_of_sale_id' => $pointOfSale->id,
                 'voucher_type' => $voucherType,
                 'letter' => $data->letter->value,
@@ -236,7 +238,7 @@ class VoucherAuthorizationManager
 
     private function ensurePointOfSaleIsActive(int $number): void
     {
-        if (! PointOfSale::query()->where('number', $number)->where('active', true)->exists()) {
+        if (! PointOfSale::query()->where($this->scope->attributes())->where('number', $number)->where('active', true)->exists()) {
             throw (new ModelNotFoundException)->setModel(PointOfSale::class, [$number]);
         }
     }

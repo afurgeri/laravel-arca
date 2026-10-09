@@ -16,6 +16,7 @@ class PointOfSaleManager
     public function __construct(
         private readonly ArcaClient $arca,
         private readonly ArcaCodeMapper $mapper,
+        private readonly ArcaScope $scope,
     ) {}
 
     /**
@@ -23,7 +24,7 @@ class PointOfSaleManager
      */
     public function active(): Collection
     {
-        return PointOfSale::query()->where('active', true)->orderBy('number')->get();
+        return PointOfSale::query()->where($this->scope->attributes())->where('active', true)->orderBy('number')->get();
     }
 
     /**
@@ -31,7 +32,7 @@ class PointOfSaleManager
      */
     public function create(array $attributes): PointOfSale
     {
-        return PointOfSale::query()->create($attributes);
+        return PointOfSale::query()->create($this->scope->attributes() + $attributes);
     }
 
     /**
@@ -49,6 +50,7 @@ class PointOfSaleManager
             if ($recordOperations) {
                 ArcaOperation::query()->create([
                     'correlation_id' => $correlationId,
+                    ...$this->scope->attributes(),
                     'method' => 'ElectronicBilling.GetSalesPoints',
                     'status' => 'successful',
                     'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
@@ -61,6 +63,7 @@ class PointOfSaleManager
             if ($recordOperations) {
                 ArcaOperation::query()->create([
                     'correlation_id' => $correlationId,
+                    ...$this->scope->attributes(),
                     'method' => 'ElectronicBilling.GetSalesPoints',
                     'status' => 'failed',
                     'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
@@ -82,10 +85,11 @@ class PointOfSaleManager
 
         foreach ($salesPoints as $salesPoint) {
             $pointOfSale = PointOfSale::query()->updateOrCreate(
-                ['number' => $salesPoint['number']],
+                $this->scope->attributes() + ['number' => $salesPoint['number']],
                 [
                     'name' => $salesPoint['name'],
                     'active' => $salesPoint['active'],
+                    ...$this->scope->attributes(),
                 ],
             );
 
@@ -147,6 +151,7 @@ class PointOfSaleManager
             if ($recordOperations) {
                 ArcaOperation::query()->create([
                     'correlation_id' => $correlationId,
+                    ...$this->scope->attributes(),
                     'method' => 'ElectronicBilling.GetLastVoucher',
                     'status' => 'successful',
                     'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
@@ -160,6 +165,7 @@ class PointOfSaleManager
             if ($recordOperations) {
                 ArcaOperation::query()->create([
                     'correlation_id' => $correlationId,
+                    ...$this->scope->attributes(),
                     'method' => 'ElectronicBilling.GetLastVoucher',
                     'status' => 'failed',
                     'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),

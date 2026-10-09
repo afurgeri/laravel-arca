@@ -63,6 +63,45 @@ ARCA_ROUTE_PREFIX=api/arca
 
 `ARCA_PRODUCTION=false` utiliza el ambiente de homologación. Cambiarlo a `true` solamente cuando el certificado, la clave, el CUIT y el access token correspondan a producción.
 
+### Varias cuentas y CUIT
+
+La aplicación consumidora administra las cuentas y sus secretos. `laravel-arca` no guarda API keys, certificados ni claves privadas. Para operar varias cuentas en el mismo proceso, crea un `ArcaManager` independiente por cuenta mediante `ArcaFactory`; el alcance de los datos queda aislado por CUIT y ambiente (`testing` u `production`). El CUIT y el ambiente se toman de las credenciales, nunca de los datos del comprobante.
+
+```php
+use Modules\Arca\ArcaFactory;
+use Modules\Arca\Data\ArcaCredentials;
+
+$arca = app(ArcaFactory::class)->forCredentials(new ArcaCredentials(
+    cuit: $account->cuit,
+    accessToken: $account->afipsdk_api_key,
+    production: true,
+    certificate: $account->certificate_pem,
+    privateKey: $account->private_key_pem,
+));
+
+$arca->pointOfSales()->syncFromArca();
+$result = $arca->authorize($voucherData);
+```
+
+`certificate` y `privateKey` reciben el contenido PEM directamente y deben enviarse juntos. Para usar un `ArcaClient` propio o un fake, se puede construir el manager con `ArcaFactory::forClient($client, $cuit, 'testing')`. No compartas una instancia de manager entre cuentas: crea una por cada par CUIT/ambiente. La fachada y las rutas existentes continúan usando la cuenta predeterminada de `config/arca.php`; en una aplicación multiusuario, la aplicación debe resolver la cuenta autorizada para cada usuario y llamar a la fábrica con sus credenciales.
+
+### Actualizar datos existentes a multi-CUIT
+
+La migración agrega CUIT y ambiente sin cambiar IDs ni relaciones, pero deja los registros preexistentes sin asignar. Antes de volver a habilitar facturación en una aplicación ya instalada, determina a qué cuenta corresponden los datos heredados y ejecuta primero una simulación:
+
+```bash
+php artisan migrate
+php artisan arca:assign-legacy --cuit=30712345678 --environment=production --dry-run
+```
+
+Si los conteos son los esperados, repite sin `--dry-run` para asignar los puntos de venta, comprobantes y operaciones que todavía no tienen ámbito:
+
+```bash
+php artisan arca:assign-legacy --cuit=30712345678 --environment=production
+```
+
+El comando no llama a ARCA ni modifica numeración, estados o CAE. Es transaccional y se niega a continuar si encuentra registros parcialmente asignados o pertenecientes a otro CUIT/ambiente. Si los datos antiguos pertenecen a más de una cuenta, no uses esta asignación global: deben clasificarse y migrarse por cuenta antes de habilitar la emisión multi-CUIT.
+
 No guardar certificados, claves privadas ni access tokens en el repositorio o en la base de datos. Los archivos de certificado deben tener permisos restrictivos y no deben quedar dentro de un directorio público.
 
 Después de modificar variables de entorno en una aplicación con configuración cacheada:

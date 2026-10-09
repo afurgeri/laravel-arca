@@ -22,7 +22,9 @@ class StorePointOfSaleRequest extends FormRequest
                 'required',
                 'integer',
                 'min:1',
-                Rule::unique((string) config('arca.table_prefix', 'arca_').'points_of_sale', 'number'),
+                Rule::unique((string) config('arca.table_prefix', 'arca_').'points_of_sale', 'number')
+                    ->where('cuit', config('arca.cuit'))
+                    ->where('environment', (bool) config('arca.production', false) ? 'production' : 'testing'),
             ],
             'name' => ['required', 'string', 'max:255'],
             'active' => ['sometimes', 'boolean'],
