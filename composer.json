@@ -7,6 +7,10 @@
     "require": {
         "php": "^8.3",
         "afipsdk/afip.php": "^1.2",
+        "ext-curl": "*",
+        "ext-dom": "*",
+        "ext-openssl": "*",
+        "illuminate/cache": "^13.0",
         "illuminate/database": "^13.0",
         "illuminate/http": "^13.0",
         "illuminate/routing": "^13.0",

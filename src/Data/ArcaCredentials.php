@@ -8,8 +8,8 @@ final readonly class ArcaCredentials
 {
     public function __construct(
         public string $cuit,
-        public string $accessToken,
-        public bool $production,
+        public ?string $accessToken = null,
+        public bool $production = false,
         public ?string $certificate = null,
         public ?string $privateKey = null,
     ) {

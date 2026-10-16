@@ -1,6 +1,6 @@
 # Laravel Arca
 
-Facturación electrónica para aplicaciones Laravel mediante [AfipSDK](https://afipsdk.com/), actualmente integrado con ARCA.
+Facturación electrónica para aplicaciones Laravel mediante conexión SOAP directa a los servicios WSAA y WSFEv1 de ARCA. El cliente AfipSDK se conserva temporalmente como adaptador opcional de compatibilidad.
 
 El paquete mantiene al CRM separado de los códigos y estructuras de ARCA. El CRM trabaja con términos de negocio como `Factura A`, `Nota de crédito B`, `USD` y `punto de venta`; el módulo realiza el mapeo, administra la numeración, autoriza el comprobante y conserva el intercambio técnico completo.
 
@@ -10,10 +10,9 @@ El módulo no envía ni administra artículos individuales. La autorización rec
 
 - PHP 8.3+
 - Laravel 13+
-- Extensión PHP SOAP
 - Extensión PHP OpenSSL
-- Una cuenta y credenciales de AfipSDK
-- Certificado y clave privada para producción, según la configuración de ARCA/AfipSDK
+- Extensiones PHP DOM y cURL
+- Certificado X.509 y clave privada asociados al servicio WSFE en ARCA
 
 ## Instalación
 
@@ -38,11 +37,26 @@ Esto crea `config/arca.php`. La configuración predeterminada es:
 
 ```php
 return [
+    'driver' => env('ARCA_DRIVER', 'soap'),
     'cuit' => env('ARCA_CUIT'),
-    'access_token' => env('ARCA_ACCESS_TOKEN'),
-    'certificate_path' => env('ARCA_CERTIFICATE_PATH'),
+    'certificate_path' => env('ARCA_CERTIFICATE_PATH'), // Compatibilidad, preferir rutas por ambiente.
     'private_key_path' => env('ARCA_PRIVATE_KEY_PATH'),
+    'certificates' => [
+        'testing' => [
+            'certificate_path' => env('ARCA_TESTING_CERTIFICATE_PATH'),
+            'private_key_path' => env('ARCA_TESTING_PRIVATE_KEY_PATH'),
+        ],
+        'production' => [
+            'certificate_path' => env('ARCA_PRODUCTION_CERTIFICATE_PATH'),
+            'private_key_path' => env('ARCA_PRODUCTION_PRIVATE_KEY_PATH'),
+        ],
+    ],
     'production' => (bool) env('ARCA_PRODUCTION', false),
+    'timeout' => (int) env('ARCA_TIMEOUT', 20),
+    'connect_timeout' => (int) env('ARCA_CONNECT_TIMEOUT', 5),
+    'ssl_cipher_list' => env('ARCA_SSL_CIPHER_LIST', 'ECDHE+AESGCM'),
+    'ticket_cache_store' => env('ARCA_TICKET_CACHE_STORE'),
+    'ticket_cache_safety_seconds' => (int) env('ARCA_TICKET_CACHE_SAFETY_SECONDS', 300),
     'table_prefix' => env('ARCA_TABLE_PREFIX', 'arca_'),
     'route_prefix' => env('ARCA_ROUTE_PREFIX', 'api/arca'),
     'route_middleware' => ['web', 'auth', 'verified'],
@@ -53,15 +67,24 @@ Variables de entorno:
 
 ```ini
 ARCA_CUIT=20111111112
-ARCA_ACCESS_TOKEN=your-afipsdk-access-token
-ARCA_CERTIFICATE_PATH=/secure/path/certificate.crt
-ARCA_PRIVATE_KEY_PATH=/secure/path/private.key
+ARCA_DRIVER=soap
+ARCA_TESTING_CERTIFICATE_PATH=/secure/path/homologacion.crt
+ARCA_TESTING_PRIVATE_KEY_PATH=/secure/path/homologacion.key
+ARCA_PRODUCTION_CERTIFICATE_PATH=/secure/path/produccion.crt
+ARCA_PRODUCTION_PRIVATE_KEY_PATH=/secure/path/produccion.key
 ARCA_PRODUCTION=false
+ARCA_TIMEOUT=20
+ARCA_CONNECT_TIMEOUT=5
+ARCA_SSL_CIPHER_LIST=ECDHE+AESGCM
+ARCA_TICKET_CACHE_STORE=redis
+ARCA_TICKET_CACHE_SAFETY_SECONDS=300
 ARCA_TABLE_PREFIX=arca_
 ARCA_ROUTE_PREFIX=api/arca
 ```
 
-`ARCA_PRODUCTION=false` utiliza el ambiente de homologación. Cambiarlo a `true` solamente cuando el certificado, la clave, el CUIT y el access token correspondan a producción.
+`ARCA_PRODUCTION=false` utiliza homologación; `true` selecciona producción. Para el cliente directo, WSAA obtiene el ticket temporal de acceso usando el certificado y la clave: no se requiere token de AfipSDK. Mantén las claves privadas fuera del repositorio y usa una caché compartida entre instancias de la aplicación.
+
+`ARCA_DRIVER=soap` selecciona la conexión directa y es el valor predeterminado. Para mantener temporalmente la integración anterior, configura `ARCA_DRIVER=afipsdk` y `ARCA_ACCESS_TOKEN`; no hay fallback automático entre conectores.
 
 ### Varias cuentas y CUIT
 
@@ -73,7 +96,6 @@ use Modules\Arca\Data\ArcaCredentials;
 
 $arca = app(ArcaFactory::class)->forCredentials(new ArcaCredentials(
     cuit: $account->cuit,
-    accessToken: $account->afipsdk_api_key,
     production: true,
     certificate: $account->certificate_pem,
     privateKey: $account->private_key_pem,
@@ -83,7 +105,7 @@ $arca->pointOfSales()->syncFromArca();
 $result = $arca->authorize($voucherData);
 ```
 
-`certificate` y `privateKey` reciben el contenido PEM directamente y deben enviarse juntos. Para usar un `ArcaClient` propio o un fake, se puede construir el manager con `ArcaFactory::forClient($client, $cuit, 'testing')`. No compartas una instancia de manager entre cuentas: crea una por cada par CUIT/ambiente. La fachada y las rutas existentes continúan usando la cuenta predeterminada de `config/arca.php`; en una aplicación multiusuario, la aplicación debe resolver la cuenta autorizada para cada usuario y llamar a la fábrica con sus credenciales.
+`certificate` y `privateKey` reciben el contenido PEM directamente y deben enviarse juntos. `accessToken` queda disponible únicamente para el adaptador AfipSDK de compatibilidad. Para usar un `ArcaClient` propio o un fake, se puede construir el manager con `ArcaFactory::forClient($client, $cuit, 'testing')`. No compartas una instancia de manager entre cuentas: crea una por cada par CUIT/ambiente. La fachada y las rutas existentes continúan usando la cuenta predeterminada de `config/arca.php`; en una aplicación multiusuario, la aplicación debe resolver la cuenta autorizada para cada usuario y llamar a la fábrica con sus credenciales.
 
 ### Actualizar datos existentes a multi-CUIT
 
@@ -251,7 +273,7 @@ Content-Type: application/json
 
 ### Consultar puntos de venta en ARCA
 
-AfipSDK expone `ElectronicBilling->GetSalesPoints()`. El módulo consulta ese servicio usando el CUIT configurado en `ARCA_CUIT` y obtiene también el último número de cada tipo de comprobante.
+El cliente SOAP directo consulta `FEParamGetPtosVenta` usando el CUIT y certificado de la instancia. El método `fromArca()` también consulta el último número de cada tipo de comprobante; para consultar únicamente puntos de venta, invoca `ArcaClient::getSalesPoints()` directamente.
 
 ```php
 use Modules\Arca\ArcaManager;
@@ -319,7 +341,6 @@ use Modules\Arca\Data\ArcaCredentials;
 
 $arca = app(ArcaFactory::class)->forCredentials(new ArcaCredentials(
     cuit: $account->cuit,
-    accessToken: $account->afipsdk_api_key,
     production: false,
     certificate: $account->certificate_pem,
     privateKey: $account->private_key_pem,
@@ -563,7 +584,7 @@ Las tablas principales son:
 | `arca_vouchers` | Comprobantes, importes, CAE y estado |
 | `arca_operations` | Auditoría técnica de llamadas a ARCA |
 
-El SDK se invoca con la respuesta completa para conservar también los detalles de rechazos. Las credenciales y claves privadas nunca forman parte del request registrado por este módulo.
+La respuesta completa del servicio se conserva para registrar detalles de rechazos. Las credenciales WSAA y claves privadas nunca forman parte del request registrado por este módulo.
 
 ## Public API PHP
 
