@@ -86,6 +86,10 @@ ARCA_ROUTE_PREFIX=api/arca
 
 `ARCA_DRIVER=soap` selecciona la conexión directa y es el valor predeterminado. Para mantener temporalmente la integración anterior, configura `ARCA_DRIVER=afipsdk` y `ARCA_ACCESS_TOKEN`; no hay fallback automático entre conectores.
 
+El adaptador AfipSDK puede usarse como contingencia mediante selección explícita. Si ARCA rechaza las fechas de su ticket con el error `(600) ValidacionDeToken: No validaron las fechas del token`, las consultas de tipos, puntos de venta, último número y comprobante individual fuerzan una renovación WSAA mediante AfipSDK y se repiten una sola vez. La renovación se registra sin credenciales; si falla o el segundo intento falla, el error se propaga.
+
+La emisión no se reintenta automáticamente, tampoco por ticket vencido. Ante una respuesta incierta, reconcilia el comprobante antes de emitir de nuevo o cambiar de proveedor. Usar el mismo certificado desde distintas aplicaciones o conectores puede provocar `alreadyAuthenticated`: no borres tickets válidos ni fuerces renovaciones en bucle. Ambos conectores dependen de la disponibilidad de ARCA.
+
 ### Varias cuentas y CUIT
 
 La aplicación consumidora administra las cuentas y sus secretos. `laravel-arca` no guarda API keys, certificados ni claves privadas. Para operar varias cuentas en el mismo proceso, crea un `ArcaManager` independiente por cuenta mediante `ArcaFactory`; el alcance de los datos queda aislado por CUIT y ambiente (`testing` u `production`). El CUIT y el ambiente se toman de las credenciales, nunca de los datos del comprobante.

@@ -3,6 +3,9 @@
 namespace Modules\Arca\Infrastructure;
 
 use Afip;
+use Closure;
+use Exception;
+use Illuminate\Support\Facades\Log;
 use Modules\Arca\Contracts\ArcaClient;
 use Modules\Arca\Data\ArcaCredentials;
 use Modules\Arca\Exceptions\ArcaException;
@@ -11,8 +14,14 @@ class AfipSdkClient implements ArcaClient
 {
     private Afip $client;
 
-    public function __construct(?ArcaCredentials $credentials = null)
+    public function __construct(?ArcaCredentials $credentials = null, ?Afip $client = null)
     {
+        if ($client !== null) {
+            $this->client = $client;
+
+            return;
+        }
+
         $options = [
             'CUIT' => (int) ($credentials === null ? config('arca.cuit') : $credentials->cuit),
             'access_token' => $credentials === null ? config('arca.access_token') : $credentials->accessToken,
@@ -44,7 +53,10 @@ class AfipSdkClient implements ArcaClient
 
     public function getLastVoucher(int $pointOfSale, int $voucherType): int
     {
-        return (int) $this->client->ElectronicBilling->GetLastVoucher($pointOfSale, $voucherType);
+        return (int) $this->readWithFreshTicket(
+            fn () => $this->client->ElectronicBilling->GetLastVoucher($pointOfSale, $voucherType),
+            'GetLastVoucher',
+        );
     }
 
     public function getVoucherInfo(int $number, int $pointOfSale, int $voucherType): ?array
@@ -55,7 +67,10 @@ class AfipSdkClient implements ArcaClient
             throw new ArcaException('The ARCA SDK does not support voucher lookup.');
         }
 
-        $response = $billing->GetVoucherInfo($number, $pointOfSale, $voucherType);
+        $response = $this->readWithFreshTicket(
+            fn () => $billing->GetVoucherInfo($number, $pointOfSale, $voucherType),
+            'GetVoucherInfo',
+        );
 
         if ($response === null) {
             return null;
@@ -68,7 +83,10 @@ class AfipSdkClient implements ArcaClient
 
     public function getSalesPoints(): array
     {
-        $response = $this->client->ElectronicBilling->GetSalesPoints();
+        $response = $this->readWithFreshTicket(
+            fn () => $this->client->ElectronicBilling->GetSalesPoints(),
+            'GetSalesPoints',
+        );
         $encoded = json_encode($response);
 
         if ($encoded === false) {
@@ -92,7 +110,7 @@ class AfipSdkClient implements ArcaClient
             throw new ArcaException('The ARCA SDK does not support voucher type lookup.');
         }
 
-        $response = $billing->GetVoucherTypes();
+        $response = $this->readWithFreshTicket(fn () => $billing->GetVoucherTypes(), 'GetVoucherTypes');
         $encoded = json_encode($response);
 
         if ($encoded === false) {
@@ -121,5 +139,31 @@ class AfipSdkClient implements ArcaClient
         $normalized = json_decode($encoded, true) ?? [];
 
         return is_array($normalized) ? $normalized : [];
+    }
+
+    /**
+     * @template T
+     *
+     * @param  Closure(): T  $query
+     * @return T
+     */
+    private function readWithFreshTicket(Closure $query, string $operation): mixed
+    {
+        try {
+            return $query();
+        } catch (Exception $exception) {
+            if (preg_match('/^\(600\)\s*ValidacionDeToken:\s*No validaron las fechas del token\b/i', $exception->getMessage()) !== 1) {
+                throw $exception;
+            }
+        }
+
+        Log::warning('AfipSDK access ticket dates rejected; forcing renewal for one read-only retry.', [
+            'driver' => 'afipsdk',
+            'operation' => $operation,
+        ]);
+
+        $this->client->GetServiceTA('wsfe', true);
+
+        return $query();
     }
 }
