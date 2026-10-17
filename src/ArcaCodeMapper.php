@@ -56,7 +56,7 @@ class ArcaCodeMapper
             'ci_buenos_aires' => 95,
             'dni' => 96,
             'passport' => 94,
-            'consumer_final' => 99,
+            'final_consumer', 'consumer_final' => 99,
             default => throw new ArcaException("Unsupported document type [{$type}]."),
         };
     }
@@ -66,7 +66,7 @@ class ArcaCodeMapper
         return match ($condition) {
             'responsible_registered' => 1,
             'exempt' => 4,
-            'consumer_final' => 5,
+            'final_consumer', 'consumer_final' => 5,
             'monotributo' => 6,
             'not_categorized' => 7,
             'foreign_provider' => 8,

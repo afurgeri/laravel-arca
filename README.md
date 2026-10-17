@@ -118,7 +118,23 @@ ARCA_STORAGE_DRIVER=mongodb
 ARCA_DB_CONNECTION=mongodb
 ```
 
-Define la conexión `mongodb` en `config/database.php` con su URI y base de datos. Se requiere un replica set o un clúster fragmentado con soporte de transacciones; la reserva de comprobantes se rechaza en Mongo standalone antes de reservar un número. Una aplicación SQL no necesita instalar la dependencia MongoDB ni su extensión PHP.
+Define la conexión `mongodb` en `config/database.php` con su URI y base de datos.
+
+**MongoDB requiere un replica set o un clúster fragmentado con soporte de transacciones. Esto también aplica a instalaciones de una sola instancia: configura un replica set de un solo nodo. Un servidor en modo standalone no está soportado para reservar y emitir comprobantes.**
+
+No necesitas agregar otro servidor: un replica set de un nodo habilita transacciones, aunque no proporciona alta disponibilidad. El adaptador las utiliza para actualizar la secuencia y crear la reserva del comprobante de forma consistente ante solicitudes simultáneas. No hay fallback automático a escrituras sin transacción.
+
+Para habilitarlo, inicia Mongo con `mongod --replSet rs0` (conservando las demás opciones de tu servicio), inicializa el conjunto una sola vez con `rs.initiate(...)` y espera a que el nodo sea primario. El hostname configurado para el miembro debe ser accesible desde los clientes y desde Mongo. En servicios existentes, planifica el reinicio, respalda los datos y revisa la configuración de autenticación antes de realizar el cambio.
+
+Para desarrollo local, si Mongo está publicado en `127.0.0.1:27017` y Laravel corre directamente en tu máquina, una URI posible es:
+
+```ini
+MONGODB_URI=mongodb://127.0.0.1:27017/?replicaSet=rs0&directConnection=true
+```
+
+La configuración de `database.connections.mongodb.dsn` debe leer esa variable. Los parámetros de la URI no convierten un standalone en replica set: el servidor debe estar configurado e inicializado previamente. `directConnection=true` es útil para este entorno local de un nodo; no copies esa configuración sin revisar la topología de producción o Kubernetes.
+
+Una aplicación SQL no necesita instalar la dependencia MongoDB ni su extensión PHP.
 
 Con la configuración elegida, ejecuta las migraciones:
 
@@ -296,9 +312,9 @@ Content-Type: application/json
     "operation": "invoice",
     "concept": "products",
     "customer": {
-        "document_type": "consumer_final",
+        "document_type": "final_consumer",
         "document_number": 0,
-        "vat_condition": "consumer_final"
+        "vat_condition": "final_consumer"
     },
     "amounts": {
         "total": 1210,
@@ -454,9 +470,11 @@ Para servicios, pueden enviarse opcionalmente `service_from`, `service_to` y `pa
 | `passport` | 94 | Pasaporte |
 | `ci_buenos_aires` | 95 | Cédula de identidad de Buenos Aires / RNP |
 | `dni` | 96 | DNI |
-| `consumer_final` | 99 | Consumidor final |
+| `final_consumer` / `consumer_final` | 99 | Consumidor final sin identificar (ambos valores admitidos) |
 
-Para consumidor final, el número de documento puede ser `0`. El emisor se configura con su CUIT en `ARCA_CUIT`; el web service de facturación no se identifica mediante un CUIL.
+El tipo de documento y la condición fiscal son independientes: un consumidor final puede estar identificado con DNI, CUIT o CUIL. El valor `final_consumer` como **tipo de documento** representa al receptor sin identificar (código `99`), con `document_number: 0`, únicamente cuando las reglas fiscales permiten no identificarlo. No uses `0` como número de un DNI, CUIT o CUIL.
+
+El emisor se configura con su CUIT en `ARCA_CUIT`; el web service de facturación no se identifica mediante un CUIL.
 
 `customer.vat_condition` acepta los siguientes valores:
 
@@ -464,7 +482,7 @@ Para consumidor final, el número de documento puede ser `0`. El emisor se confi
 | --- | ---: | --- |
 | `responsible_registered` | 1 | IVA responsable inscripto |
 | `exempt` | 4 | IVA sujeto exento |
-| `consumer_final` | 5 | Consumidor final |
+| `final_consumer` / `consumer_final` | 5 | Consumidor final (ambos valores admitidos) |
 | `monotributo` | 6 | Responsable monotributo |
 | `not_categorized` | 7 | Sujeto no categorizado |
 | `foreign_provider` | 8 | Proveedor del exterior |
@@ -473,6 +491,32 @@ Para consumidor final, el número de documento puede ser `0`. El emisor se confi
 | `social_monotributo` | 13 | Monotributista social |
 | `not_reached` | 15 | IVA no alcanzado |
 | `promoted_monotributo` | 16 | Monotributo trabajador independiente promovido |
+
+En ambos campos se recomienda `final_consumer`; `consumer_final` sigue admitido como alias por retrocompatibilidad y produce exactamente el mismo código ARCA. No es necesario modificar las solicitudes existentes.
+
+Ejemplo de consumidor final identificado con DNI:
+
+```json
+{
+    "customer": {
+        "document_type": "dni",
+        "document_number": 30123456,
+        "vat_condition": "final_consumer"
+    }
+}
+```
+
+Ejemplo de consumidor final sin identificar, cuando esté permitido:
+
+```json
+{
+    "customer": {
+        "document_type": "final_consumer",
+        "document_number": 0,
+        "vat_condition": "final_consumer"
+    }
+}
+```
 
 ### Importes
 
