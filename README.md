@@ -37,6 +37,8 @@ Esto crea `config/arca.php`. La configuración predeterminada es:
 
 ```php
 return [
+    'storage_driver' => env('ARCA_STORAGE_DRIVER', 'eloquent'),
+    'connection' => env('ARCA_DB_CONNECTION'),
     'driver' => env('ARCA_DRIVER', 'soap'),
     'cuit' => env('ARCA_CUIT'),
     'certificate_path' => env('ARCA_CERTIFICATE_PATH'), // Compatibilidad, preferir rutas por ambiente.
@@ -67,6 +69,8 @@ Variables de entorno:
 
 ```ini
 ARCA_CUIT=20111111112
+ARCA_STORAGE_DRIVER=eloquent
+ARCA_DB_CONNECTION=mysql
 ARCA_DRIVER=soap
 ARCA_TESTING_CERTIFICATE_PATH=/secure/path/homologacion.crt
 ARCA_TESTING_PRIVATE_KEY_PATH=/secure/path/homologacion.key
@@ -89,6 +93,46 @@ ARCA_ROUTE_PREFIX=api/arca
 El adaptador AfipSDK puede usarse como contingencia mediante selección explícita. Si ARCA rechaza las fechas de su ticket con el error `(600) ValidacionDeToken: No validaron las fechas del token`, las consultas de tipos, puntos de venta, último número y comprobante individual fuerzan una renovación WSAA mediante AfipSDK y se repiten una sola vez. La renovación se registra sin credenciales; si falla o el segundo intento falla, el error se propaga.
 
 La emisión no se reintenta automáticamente, tampoco por ticket vencido. Ante una respuesta incierta, reconcilia el comprobante antes de emitir de nuevo o cambiar de proveedor. Usar el mismo certificado desde distintas aplicaciones o conectores puede provocar `alreadyAuthenticated`: no borres tickets válidos ni fuerces renovaciones en bucle. Ambos conectores dependen de la disponibilidad de ARCA.
+
+### Almacenamiento SQL o MongoDB
+
+El almacenamiento es independiente del conector fiscal: tanto `soap` como `afipsdk` pueden usarse con cualquiera de los dos adaptadores.
+
+SQL es el predeterminado y conserva las tablas, modelos e IDs enteros existentes:
+
+```ini
+ARCA_STORAGE_DRIVER=eloquent
+ARCA_DB_CONNECTION=mysql
+```
+
+`ARCA_DB_CONNECTION` es el nombre de una conexión definida en `config/database.php`, no el nombre del motor. Si se omite, se usa la conexión predeterminada de Laravel. Los modelos, relaciones y transacciones de ARCA usan esa conexión, aunque la aplicación principal utilice otra. SQLite se usa para regresiones; las reservas concurrentes se verifican también con MySQL real.
+
+Para MongoDB, instala la integración oficial en la aplicación consumidora:
+
+```bash
+composer require mongodb/laravel-mongodb:^5.11
+```
+
+```ini
+ARCA_STORAGE_DRIVER=mongodb
+ARCA_DB_CONNECTION=mongodb
+```
+
+Define la conexión `mongodb` en `config/database.php` con su URI y base de datos. Se requiere un replica set o un clúster fragmentado con soporte de transacciones; la reserva de comprobantes se rechaza en Mongo standalone antes de reservar un número. Una aplicación SQL no necesita instalar la dependencia MongoDB ni su extensión PHP.
+
+Con la configuración elegida, ejecuta las migraciones:
+
+```bash
+php artisan migrate
+```
+
+El proveedor registra únicamente las migraciones del adaptador seleccionado. Las migraciones SQL conservan sus nombres y operaciones de esquema; su conexión ahora respeta `ARCA_DB_CONNECTION`. Si la conexión principal de la aplicación es distinta, Laravel mantiene su historial de migraciones en la conexión del comando y ejecuta los cambios de ARCA en la conexión configurada. Para administrar el historial específicamente en la base de ARCA, utiliza `php artisan migrate --database=nombre_de_conexion`; ten en cuenta que ese comando también puede ejecutar migraciones pendientes de otros paquetes.
+
+Mongo utiliza las colecciones `arca_points_of_sale`, `arca_sequences`, `arca_vouchers` y `arca_operations`, respetando `ARCA_TABLE_PREFIX`. Los índices únicos parciales permiten múltiples comprobantes sin clave de idempotencia o con número liberado, pero impiden duplicar claves o números vigentes. No se utilizan claves foráneas ni cascadas SQL: no elimines directamente documentos referenciados.
+
+La API del manager y `AuthorizationResult::toArray()` se mantienen. `voucher_id` es un entero en SQL y un string en MongoDB. Los modelos SQL siguen en `Modules\Arca\Models`; los modelos documentales están en `Modules\Arca\Models\Mongo` y usan el trait oficial `DocumentModel`. Prefiere los managers para código independiente del motor; los imports de modelos SQL no cambian automáticamente a Mongo.
+
+Cambiar el adaptador no copia ni migra información entre bases. No cambies de motor sobre una cuenta con operaciones pendientes sin una migración y reconciliación explícitas. La dependencia MongoDB es opcional en producción y se incorpora como dependencia de desarrollo para las pruebas del paquete.
 
 ### Varias cuentas y CUIT
 
@@ -539,7 +583,9 @@ Nota de débito C
 
 Antes de reservar un número, el módulo consulta el último comprobante autorizado por ARCA y ajusta la secuencia local. La reserva se realiza dentro de una transacción con bloqueo para evitar números duplicados en solicitudes concurrentes.
 
-Un número reservado no se reutiliza si una solicitud posterior falla. Esto conserva la trazabilidad y evita volver a enviar un número que pudo haber sido aceptado por ARCA durante un timeout.
+Un número pendiente no se reutiliza mientras una solicitud pueda estar en curso. Los intentos rechazados o inciertos se consultan en ARCA antes de liberar su número: si fue autorizado, se recupera el CAE; si no existe, se conserva `attempted_number` y el intento pasa a `failed`. Una consulta fallida nunca debe considerarse confirmación de ausencia.
+
+La consulta de reconciliación ocurre fuera de la transacción de reserva. Dentro de la transacción se vuelve a comprobar el comprobante ocupado para evitar liberar un número cuyo estado cambió. Mongo serializa reservas mediante escrituras sobre el documento de secuencia y transacciones con reintentos locales acotados; las llamadas fiscales y la emisión nunca se ejecutan dentro de esos reintentos.
 
 ## Idempotencia
 
@@ -629,6 +675,17 @@ php artisan test --compact tests/Feature/Arca/ArcaManagerTest.php
 vendor/bin/pint --dirty --format agent
 vendor/bin/phpstan analyse modules/Arca/src --no-progress
 ```
+
+Las pruebas de integración usan exclusivamente una base aislada llamada `arca_storage_test`. Para ejecutarlas en el proyecto de desarrollo, proporciona servicios de pruebas (Mongo replica set, Mongo standalone y MySQL, respectivamente):
+
+```bash
+ARCA_TEST_MONGODB_URI='mongodb://127.0.0.1:27028/?directConnection=true' \
+ARCA_TEST_MONGODB_STANDALONE_URI='mongodb://127.0.0.1:27029/?directConnection=true' \
+ARCA_TEST_MYSQL_PORT=33078 \
+php artisan test --compact tests/Feature/Arca
+```
+
+Los tests utilizan prefijos aislados y eliminan únicamente sus tablas o colecciones. Sin esas variables, las verificaciones externas se omiten. Configura un límite de archivos abiertos suficiente para MongoDB (`nofile=65536`) y no apuntes estas variables a bases reales. Las pruebas concurrentes usan procesos PHP separados, sin llamadas reales a ARCA.
 
 ## Fuera de alcance actual
 

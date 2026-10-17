@@ -4,6 +4,7 @@ namespace Modules\Arca;
 
 use Illuminate\Cache\CacheManager;
 use Modules\Arca\Contracts\ArcaClient;
+use Modules\Arca\Contracts\ArcaStorage;
 use Modules\Arca\Data\ArcaCredentials;
 use Modules\Arca\Exceptions\ArcaException;
 use Modules\Arca\Infrastructure\AfipSdkClient;
@@ -80,10 +81,11 @@ class ArcaFactory
     {
         $mapper = new ArcaCodeMapper;
         $scope = new ArcaScope($cuit, $environment);
+        $storage = app(ArcaStorage::class);
 
         return new ArcaManager(
-            new PointOfSaleManager($client, $mapper, $scope),
-            new VoucherAuthorizationManager($client, $mapper, $scope),
+            new PointOfSaleManager($client, $mapper, $scope, $storage),
+            new VoucherAuthorizationManager($client, $mapper, $scope, $storage),
             $client,
         );
     }

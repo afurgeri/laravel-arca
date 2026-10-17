@@ -3,18 +3,17 @@
 namespace Modules\Arca\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * @property int $id
- * @property int $point_of_sale_id
+ * @property int|string $id
+ * @property int|string $point_of_sale_id
  * @property int $voucher_type
  * @property int $next_number
  * @property int $last_synced_number
  */
 #[Fillable(['point_of_sale_id', 'voucher_type', 'next_number', 'last_synced_number'])]
-class Sequence extends Model
+class Sequence extends ArcaModel
 {
     public function getTable(): string
     {
@@ -26,6 +25,12 @@ class Sequence extends Model
      */
     public function pointOfSale(): BelongsTo
     {
-        return $this->belongsTo(PointOfSale::class);
+        return $this->belongsTo($this->pointModel(), 'point_of_sale_id');
+    }
+
+    /** @return class-string<PointOfSale> */
+    protected function pointModel(): string
+    {
+        return PointOfSale::class;
     }
 }

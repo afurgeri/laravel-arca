@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'storage_driver' => env('ARCA_STORAGE_DRIVER', 'eloquent'),
+    'connection' => env('ARCA_DB_CONNECTION'),
     'driver' => env('ARCA_DRIVER', 'soap'),
     'cuit' => env('ARCA_CUIT'),
     'access_token' => env('ARCA_ACCESS_TOKEN'),

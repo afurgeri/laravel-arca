@@ -18,6 +18,7 @@
         "illuminate/validation": "^13.0"
     },
     "require-dev": {
+        "mongodb/laravel-mongodb": "^5.11",
         "laravel/pint": "^1.29",
         "orchestra/testbench": "^11.0",
         "pestphp/pest": "^4.7",
@@ -27,6 +28,9 @@
         "psr-4": {
             "Modules\\Arca\\": "src/"
         }
+    },
+    "suggest": {
+        "mongodb/laravel-mongodb": "Required for the optional MongoDB storage driver (^5.11)."
     },
     "autoload-dev": {
         "psr-4": {

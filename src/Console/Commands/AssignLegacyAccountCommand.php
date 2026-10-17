@@ -3,10 +3,8 @@
 namespace Modules\Arca\Console\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
-use Modules\Arca\Models\ArcaOperation;
-use Modules\Arca\Models\PointOfSale;
-use Modules\Arca\Models\Voucher;
+use Modules\Arca\ArcaScope;
+use Modules\Arca\Contracts\ArcaStorage;
 use RuntimeException;
 
 class AssignLegacyAccountCommand extends Command
@@ -15,7 +13,7 @@ class AssignLegacyAccountCommand extends Command
 
     protected $description = 'Assign existing unscoped ARCA records to one CUIT and environment.';
 
-    public function handle(): int
+    public function handle(ArcaStorage $storage): int
     {
         $cuit = (string) $this->option('cuit');
         $environment = (string) $this->option('environment');
@@ -26,34 +24,20 @@ class AssignLegacyAccountCommand extends Command
             return self::FAILURE;
         }
 
-        $models = [PointOfSale::class, Voucher::class, ArcaOperation::class];
-        $counts = [];
+        $scope = new ArcaScope($cuit, $environment);
+        $counts = $storage->legacySummary($scope);
 
-        foreach ($models as $model) {
-            $query = $model::query();
-            $conflicting = (clone $query)->where(function ($query) use ($cuit, $environment): void {
-                $query->where(function ($query): void {
-                    $query->whereNull('cuit')->whereNotNull('environment')
-                        ->orWhereNotNull('cuit')->whereNull('environment');
-                })->orWhere(function ($query) use ($cuit, $environment): void {
-                    $query->whereNotNull('cuit')->whereNotNull('environment')
-                        ->where(function ($query) use ($cuit, $environment): void {
-                            $query->where('cuit', '!=', $cuit)->orWhere('environment', '!=', $environment);
-                        });
-                });
-            })->count();
-
-            if ($conflicting > 0) {
+        foreach ($counts as $model => $count) {
+            if ($count['conflicting'] > 0) {
                 $this->error("{$model} contains partially assigned or differently assigned records; no changes made.");
 
                 return self::FAILURE;
             }
 
-            $counts[$model] = (clone $query)->whereNull('cuit')->whereNull('environment')->count();
         }
 
         foreach ($counts as $model => $count) {
-            $this->line(class_basename($model).": {$count} record(s)");
+            $this->line($model.": {$count['unassigned']} record(s)");
         }
 
         if ($this->option('dry-run')) {
@@ -63,14 +47,7 @@ class AssignLegacyAccountCommand extends Command
         }
 
         try {
-            DB::transaction(function () use ($models, $cuit, $environment): void {
-                foreach ($models as $model) {
-                    $model::query()->whereNull('cuit')->whereNull('environment')->update([
-                        'cuit' => $cuit,
-                        'environment' => $environment,
-                    ]);
-                }
-            });
+            $storage->assignLegacy($scope);
         } catch (RuntimeException $exception) {
             $this->error('Legacy assignment failed: '.$exception->getMessage());
 

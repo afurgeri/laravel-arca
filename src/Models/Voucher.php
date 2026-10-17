@@ -3,14 +3,13 @@
 namespace Modules\Arca\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
- * @property int $id
- * @property int $point_of_sale_id
+ * @property int|string $id
+ * @property int|string $point_of_sale_id
  * @property int $voucher_type
  * @property string $letter
  * @property string $operation
@@ -30,7 +29,7 @@ use Illuminate\Support\Carbon;
     'customer', 'amounts', 'vat_rates', 'associated_voucher', 'idempotency_key',
     'cae', 'cae_expires_at', 'arca_response', 'error_code', 'error_message',
 ])]
-class Voucher extends Model
+class Voucher extends ArcaModel
 {
     protected function casts(): array
     {
@@ -54,7 +53,7 @@ class Voucher extends Model
      */
     public function pointOfSale(): BelongsTo
     {
-        return $this->belongsTo(PointOfSale::class);
+        return $this->belongsTo($this->pointModel(), 'point_of_sale_id');
     }
 
     /**
@@ -62,6 +61,18 @@ class Voucher extends Model
      */
     public function operations(): HasMany
     {
-        return $this->hasMany(ArcaOperation::class);
+        return $this->hasMany($this->operationModel(), 'voucher_id');
+    }
+
+    /** @return class-string<PointOfSale> */
+    protected function pointModel(): string
+    {
+        return PointOfSale::class;
+    }
+
+    /** @return class-string<ArcaOperation> */
+    protected function operationModel(): string
+    {
+        return ArcaOperation::class;
     }
 }

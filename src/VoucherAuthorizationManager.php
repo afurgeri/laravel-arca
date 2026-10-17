@@ -3,20 +3,16 @@
 namespace Modules\Arca;
 
 use DateTimeImmutable;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Modules\Arca\Contracts\ArcaClient;
+use Modules\Arca\Contracts\ArcaStorage;
 use Modules\Arca\Data\AuthorizationResult;
 use Modules\Arca\Data\IssueVoucherData;
 use Modules\Arca\Enums\Currency;
 use Modules\Arca\Enums\VoucherLetter;
 use Modules\Arca\Enums\VoucherOperation;
 use Modules\Arca\Enums\VoucherStatus;
-use Modules\Arca\Models\ArcaOperation;
-use Modules\Arca\Models\PointOfSale;
-use Modules\Arca\Models\Sequence;
 use Modules\Arca\Models\Voucher;
 use RuntimeException;
 use Throwable;
@@ -27,13 +23,14 @@ class VoucherAuthorizationManager
         private readonly ArcaClient $arca,
         private readonly ArcaCodeMapper $mapper,
         private readonly ArcaScope $scope,
+        private readonly ArcaStorage $storage,
     ) {}
 
     public function authorize(IssueVoucherData $data): AuthorizationResult
     {
         $existing = $data->idempotencyKey === null
             ? null
-            : Voucher::query()->where($this->scope->attributes())->where('idempotency_key', $data->idempotencyKey)->first();
+            : $this->storage->findIdempotentVoucher($this->scope, $data->idempotencyKey);
 
         if ($existing !== null) {
             if (in_array($existing->status, [VoucherStatus::Pending->value, VoucherStatus::Unknown->value, VoucherStatus::Rejected->value], true) && $existing->number !== null) {
@@ -43,10 +40,26 @@ class VoucherAuthorizationManager
             return new AuthorizationResult($existing);
         }
 
-        $this->ensurePointOfSaleIsActive($data->pointOfSale);
+        $point = $this->storage->activePoint($this->scope, $data->pointOfSale);
         $voucherType = $this->mapper->voucherType($data->letter, $data->operation);
         $lastAuthorized = $this->lastAuthorizedVoucher($data->pointOfSale, $voucherType);
-        $voucher = $this->reserveVoucher($data, $voucherType, $lastAuthorized);
+        $occupied = $this->storage->occupiedVoucher($point, $voucherType, $lastAuthorized + 1);
+
+        if ($occupied !== null && in_array($occupied->status, [VoucherStatus::Rejected->value, VoucherStatus::Unknown->value], true)) {
+            $this->reconcileVoucher($occupied, $data->pointOfSale);
+
+            if ($occupied->status === VoucherStatus::Authorized->value) {
+                throw new RuntimeException("ARCA voucher {$occupied->number} was already authorized. Synchronize the point of sale before issuing another voucher.");
+            }
+        }
+
+        $reservation = $this->storage->reserveVoucher($this->scope, $data, $voucherType, $lastAuthorized, $occupied);
+        $voucher = $reservation->voucher;
+
+        if (! $reservation->created) {
+            return new AuthorizationResult($voucher);
+        }
+
         $payload = $this->payload($data, $voucher->number, $voucherType);
         $correlationId = (string) Str::uuid();
         $startedAt = microtime(true);
@@ -60,7 +73,7 @@ class VoucherAuthorizationManager
             $status = $authorized ? VoucherStatus::Authorized->value : VoucherStatus::Rejected->value;
             $errorMessage = $authorized ? null : $this->responseMessage($response);
 
-            ArcaOperation::query()->create($this->scope->attributes() + [
+            $this->storage->recordOperation($this->scope, [
                 'voucher_id' => $voucher->id,
                 'correlation_id' => $correlationId,
                 'method' => 'ElectronicBilling.CreateVoucher',
@@ -71,7 +84,7 @@ class VoucherAuthorizationManager
                 'error_message' => $errorMessage,
             ]);
 
-            $voucher->update([
+            $this->storage->updateVoucher($voucher, [
                 'status' => $status,
                 'cae' => $authorized ? (string) $cae : null,
                 'cae_expires_at' => $authorized ? $this->normalizeCaeExpirationDate($caeExpiresAt) : null,
@@ -79,7 +92,7 @@ class VoucherAuthorizationManager
                 'error_message' => $errorMessage,
             ]);
         } catch (Throwable $exception) {
-            ArcaOperation::query()->create($this->scope->attributes() + [
+            $this->storage->recordOperation($this->scope, [
                 'voucher_id' => $voucher->id,
                 'correlation_id' => $correlationId,
                 'method' => 'ElectronicBilling.CreateVoucher',
@@ -89,7 +102,7 @@ class VoucherAuthorizationManager
                 'error_message' => $exception->getMessage(),
             ]);
 
-            $voucher->update([
+            $this->storage->updateVoucher($voucher, [
                 'status' => VoucherStatus::Unknown->value,
                 'error_message' => $exception->getMessage(),
             ]);
@@ -106,7 +119,7 @@ class VoucherAuthorizationManager
         try {
             $last = $this->arca->getLastVoucher($pointOfSale, $voucherType);
 
-            ArcaOperation::query()->create($this->scope->attributes() + [
+            $this->storage->recordOperation($this->scope, [
                 'correlation_id' => $correlationId,
                 'method' => 'ElectronicBilling.GetLastVoucher',
                 'status' => 'successful',
@@ -117,7 +130,7 @@ class VoucherAuthorizationManager
 
             return $last;
         } catch (Throwable $exception) {
-            ArcaOperation::query()->create($this->scope->attributes() + [
+            $this->storage->recordOperation($this->scope, [
                 'correlation_id' => $correlationId,
                 'method' => 'ElectronicBilling.GetLastVoucher',
                 'status' => 'failed',
@@ -128,73 +141,6 @@ class VoucherAuthorizationManager
 
             throw $exception;
         }
-    }
-
-    private function reserveVoucher(IssueVoucherData $data, int $voucherType, int $lastAuthorized): Voucher
-    {
-        return DB::transaction(function () use ($data, $voucherType, $lastAuthorized): Voucher {
-            $pointOfSale = PointOfSale::query()
-                ->where($this->scope->attributes())
-                ->where('number', $data->pointOfSale)
-                ->where('active', true)
-                ->first();
-
-            if ($pointOfSale === null) {
-                throw (new ModelNotFoundException)->setModel(PointOfSale::class, [$data->pointOfSale]);
-            }
-
-            $sequence = Sequence::query()->firstOrCreate(
-                ['point_of_sale_id' => $pointOfSale->id, 'voucher_type' => $voucherType],
-                ['next_number' => 1, 'last_synced_number' => 0],
-            );
-            $sequence = Sequence::query()->whereKey($sequence->id)->lockForUpdate()->firstOrFail();
-            $number = $lastAuthorized + 1;
-            $occupied = Voucher::query()
-                ->where('point_of_sale_id', $pointOfSale->id)
-                ->where('voucher_type', $voucherType)
-                ->where('number', $number)
-                ->lockForUpdate()
-                ->first();
-
-            if ($occupied !== null) {
-                if (! in_array($occupied->status, [VoucherStatus::Rejected->value, VoucherStatus::Unknown->value], true)) {
-                    throw new RuntimeException("ARCA voucher {$number} is already reserved locally. Verify its authorization before issuing another voucher.");
-                }
-
-                $this->reconcileVoucher($occupied, $data->pointOfSale);
-
-                if ($occupied->status === VoucherStatus::Authorized->value) {
-                    throw new RuntimeException("ARCA voucher {$number} was already authorized. Synchronize the point of sale before issuing another voucher.");
-                }
-
-                $occupied->update([
-                    'attempted_number' => $number,
-                    'number' => null,
-                    'status' => VoucherStatus::Failed->value,
-                ]);
-            }
-
-            $sequence->update([
-                'next_number' => $number + 1,
-                'last_synced_number' => max((int) $sequence->last_synced_number, $lastAuthorized),
-            ]);
-
-            return Voucher::query()->create($this->scope->attributes() + [
-                'point_of_sale_id' => $pointOfSale->id,
-                'voucher_type' => $voucherType,
-                'letter' => $data->letter->value,
-                'operation' => $data->operation->value,
-                'currency' => $data->currency->value,
-                'exchange_rate' => $data->exchangeRate,
-                'number' => $number,
-                'status' => VoucherStatus::Pending->value,
-                'customer' => $data->customer,
-                'amounts' => $data->amounts,
-                'vat_rates' => $data->vatRates,
-                'associated_voucher' => $data->associatedVoucher,
-                'idempotency_key' => $data->idempotencyKey,
-            ]);
-        });
     }
 
     private function reconcileVoucher(Voucher $voucher, int $pointOfSale): void
@@ -213,7 +159,7 @@ class VoucherAuthorizationManager
         $documentNumber = $response['DocNro'] ?? null;
         $documentType = $response['DocTipo'] ?? null;
         $total = $response['ImpTotal'] ?? null;
-        $request = $voucher->operations()->where('method', 'ElectronicBilling.CreateVoucher')->latest('id')->first()?->request;
+        $request = $this->storage->lastAuthorizationRequest($voucher);
         $dateMatches = ! isset($request['CbteFch'], $response['CbteFch'])
             || (string) $request['CbteFch'] === str_replace('-', '', (string) $response['CbteFch']);
         $currencyMatches = ! isset($response['MonId'])
@@ -227,20 +173,13 @@ class VoucherAuthorizationManager
             throw new RuntimeException("ARCA voucher {$voucher->number} exists but does not match the local invoice. Manual reconciliation is required.");
         }
 
-        $voucher->update([
+        $this->storage->updateVoucher($voucher, [
             'status' => VoucherStatus::Authorized->value,
             'cae' => (string) $cae,
             'cae_expires_at' => $this->normalizeCaeExpirationDate($response['FchVto'] ?? $response['CAEFchVto'] ?? null),
             'arca_response' => $response,
             'error_message' => null,
         ]);
-    }
-
-    private function ensurePointOfSaleIsActive(int $number): void
-    {
-        if (! PointOfSale::query()->where($this->scope->attributes())->where('number', $number)->where('active', true)->exists()) {
-            throw (new ModelNotFoundException)->setModel(PointOfSale::class, [$number]);
-        }
     }
 
     private function normalizeCaeExpirationDate(mixed $date): ?string

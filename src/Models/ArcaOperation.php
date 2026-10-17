@@ -3,7 +3,6 @@
 namespace Modules\Arca\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -13,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'cuit', 'environment', 'voucher_id', 'correlation_id', 'method', 'status', 'http_status', 'attempt',
     'duration_ms', 'request', 'response', 'error_code', 'error_message',
 ])]
-class ArcaOperation extends Model
+class ArcaOperation extends ArcaModel
 {
     protected function casts(): array
     {
@@ -33,6 +32,12 @@ class ArcaOperation extends Model
      */
     public function voucher(): BelongsTo
     {
-        return $this->belongsTo(Voucher::class);
+        return $this->belongsTo($this->voucherModel(), 'voucher_id');
+    }
+
+    /** @return class-string<Voucher> */
+    protected function voucherModel(): string
+    {
+        return Voucher::class;
     }
 }

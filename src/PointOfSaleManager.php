@@ -3,12 +3,10 @@
 namespace Modules\Arca;
 
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Modules\Arca\Contracts\ArcaClient;
-use Modules\Arca\Models\ArcaOperation;
+use Modules\Arca\Contracts\ArcaStorage;
 use Modules\Arca\Models\PointOfSale;
-use Modules\Arca\Models\Sequence;
 use Throwable;
 
 class PointOfSaleManager
@@ -17,6 +15,7 @@ class PointOfSaleManager
         private readonly ArcaClient $arca,
         private readonly ArcaCodeMapper $mapper,
         private readonly ArcaScope $scope,
+        private readonly ArcaStorage $storage,
     ) {}
 
     /**
@@ -24,7 +23,7 @@ class PointOfSaleManager
      */
     public function active(): Collection
     {
-        return PointOfSale::query()->where($this->scope->attributes())->where('active', true)->orderBy('number')->get();
+        return $this->storage->activePoints($this->scope);
     }
 
     /**
@@ -32,7 +31,7 @@ class PointOfSaleManager
      */
     public function create(array $attributes): PointOfSale
     {
-        return PointOfSale::query()->create($this->scope->attributes() + $attributes);
+        return $this->storage->createPoint($this->scope, $attributes);
     }
 
     /**
@@ -48,7 +47,7 @@ class PointOfSaleManager
             $result = array_map(fn (array $salesPoint): array => $this->salesPointWithCounters($salesPoint, $recordOperations), $salesPoints);
 
             if ($recordOperations) {
-                ArcaOperation::query()->create([
+                $this->storage->recordOperation($this->scope, [
                     'correlation_id' => $correlationId,
                     ...$this->scope->attributes(),
                     'method' => 'ElectronicBilling.GetSalesPoints',
@@ -61,7 +60,7 @@ class PointOfSaleManager
             return $result;
         } catch (Throwable $exception) {
             if ($recordOperations) {
-                ArcaOperation::query()->create([
+                $this->storage->recordOperation($this->scope, [
                     'correlation_id' => $correlationId,
                     ...$this->scope->attributes(),
                     'method' => 'ElectronicBilling.GetSalesPoints',
@@ -84,8 +83,9 @@ class PointOfSaleManager
         $voucherTypes = $this->mapper->voucherTypes();
 
         foreach ($salesPoints as $salesPoint) {
-            $pointOfSale = PointOfSale::query()->updateOrCreate(
-                $this->scope->attributes() + ['number' => $salesPoint['number']],
+            $pointOfSale = $this->storage->syncPoint(
+                $this->scope,
+                $salesPoint['number'],
                 [
                     'name' => $salesPoint['name'],
                     'active' => $salesPoint['active'],
@@ -97,18 +97,7 @@ class PointOfSaleManager
                 $voucherType = $voucherTypes[$index]['type'];
                 $lastNumber = (int) $counter['last_number'];
 
-                DB::transaction(function () use ($pointOfSale, $voucherType, $lastNumber): void {
-                    $sequence = Sequence::query()->firstOrCreate(
-                        ['point_of_sale_id' => $pointOfSale->id, 'voucher_type' => $voucherType],
-                        ['next_number' => 1, 'last_synced_number' => 0],
-                    );
-                    $sequence = Sequence::query()->whereKey($sequence->id)->lockForUpdate()->firstOrFail();
-
-                    $sequence->update([
-                        'next_number' => $lastNumber + 1,
-                        'last_synced_number' => $lastNumber,
-                    ]);
-                });
+                $this->storage->syncSequence($pointOfSale, $voucherType, $lastNumber);
             }
         }
 
@@ -149,7 +138,7 @@ class PointOfSaleManager
         try {
             $last = $this->arca->getLastVoucher($pointOfSale, $voucherType);
             if ($recordOperations) {
-                ArcaOperation::query()->create([
+                $this->storage->recordOperation($this->scope, [
                     'correlation_id' => $correlationId,
                     ...$this->scope->attributes(),
                     'method' => 'ElectronicBilling.GetLastVoucher',
@@ -163,7 +152,7 @@ class PointOfSaleManager
             return $last;
         } catch (Throwable $exception) {
             if ($recordOperations) {
-                ArcaOperation::query()->create([
+                $this->storage->recordOperation($this->scope, [
                     'correlation_id' => $correlationId,
                     ...$this->scope->attributes(),
                     'method' => 'ElectronicBilling.GetLastVoucher',
