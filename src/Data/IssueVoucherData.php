@@ -43,7 +43,7 @@ final readonly class IssueVoucherData
         $validated = Validator::make($input, [
             'point_of_sale' => ['required', 'integer', 'min:1'],
             'letter' => ['required', 'string', 'in:A,B,C'],
-            'operation' => ['required', 'string', 'in:invoice,credit_note,debit_note'],
+            'operation' => ['required', 'string', 'in:invoice,receipt,credit_note,debit_note'],
             'concept' => ['nullable', 'string', 'in:products,services,products_and_services'],
             'currency' => ['nullable', 'string', 'in:ARS,USD,EUR'],
             'exchange_rate' => ['nullable', 'numeric', 'gt:0'],
@@ -66,6 +66,7 @@ final readonly class IssueVoucherData
             'associated_voucher.point_of_sale' => ['required_with:associated_voucher', 'integer', 'min:1'],
             'associated_voucher.number' => ['required_with:associated_voucher', 'integer', 'min:1'],
             'associated_voucher.letter' => ['required_with:associated_voucher', 'string', 'in:A,B,C'],
+            'associated_voucher.operation' => ['sometimes', 'string', 'in:invoice,receipt'],
             'date' => ['nullable', 'date_format:Y-m-d'],
             'service_from' => ['nullable', 'date_format:Y-m-d'],
             'service_to' => ['nullable', 'date_format:Y-m-d'],
@@ -87,8 +88,16 @@ final readonly class IssueVoucherData
                 $validator->errors()->add('amounts.total', 'The total must equal the sum of all amount categories.');
             }
 
-            if (($input['operation'] ?? null) !== 'invoice' && ! isset($input['associated_voucher'])) {
+            if (in_array($input['operation'] ?? null, ['credit_note', 'debit_note'], true) && ! isset($input['associated_voucher'])) {
                 $validator->errors()->add('associated_voucher', 'Credit and debit notes require an associated invoice.');
+            }
+
+            if (($input['operation'] ?? null) === 'receipt' && ($input['letter'] ?? null) !== 'C') {
+                $validator->errors()->add('letter', 'Receipts are only supported for letter C.');
+            }
+
+            if (Arr::get($input, 'associated_voucher.operation') === 'receipt' && Arr::get($input, 'associated_voucher.letter') !== 'C') {
+                $validator->errors()->add('associated_voucher.letter', 'Receipts are only supported for letter C.');
             }
 
             if (in_array($input['currency'] ?? 'ARS', ['USD', 'EUR'], true) && ! isset($input['exchange_rate'])) {

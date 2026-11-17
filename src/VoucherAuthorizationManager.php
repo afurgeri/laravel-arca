@@ -247,7 +247,7 @@ class VoucherAuthorizationManager
         if ($data->associatedVoucher !== null) {
             $associatedType = $this->mapper->voucherType(
                 VoucherLetter::from($data->associatedVoucher['letter']),
-                VoucherOperation::Invoice,
+                VoucherOperation::from($data->associatedVoucher['operation'] ?? 'invoice'),
             );
 
             $payload['CbtesAsoc'] = [[

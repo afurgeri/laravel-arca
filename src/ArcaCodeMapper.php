@@ -24,6 +24,7 @@ class ArcaCodeMapper
             ['letter' => 'C', 'operation' => 'invoice', 'type' => 11, 'label' => 'Factura C'],
             ['letter' => 'C', 'operation' => 'debit_note', 'type' => 12, 'label' => 'Nota de débito C'],
             ['letter' => 'C', 'operation' => 'credit_note', 'type' => 13, 'label' => 'Nota de crédito C'],
+            ['letter' => 'C', 'operation' => 'receipt', 'type' => 15, 'label' => 'Recibo C'],
         ];
     }
 
@@ -39,6 +40,9 @@ class ArcaCodeMapper
             [VoucherLetter::C, VoucherOperation::Invoice] => 11,
             [VoucherLetter::C, VoucherOperation::DebitNote] => 12,
             [VoucherLetter::C, VoucherOperation::CreditNote] => 13,
+            [VoucherLetter::C, VoucherOperation::Receipt] => 15,
+            [VoucherLetter::A, VoucherOperation::Receipt],
+            [VoucherLetter::B, VoucherOperation::Receipt] => throw new ArcaException('Receipts are only supported for letter C.'),
         };
     }
 
